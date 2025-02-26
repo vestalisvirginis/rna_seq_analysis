@@ -1,0 +1,7 @@
+#Folders:
+.venv
+/temp
+
+
+#Files
+__pycache__
