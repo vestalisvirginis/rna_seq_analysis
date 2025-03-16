@@ -63,6 +63,20 @@ find temp/gz_files/*.gz -exec fastqc -o temp/fastqc/ {} \;
 mkdir temp/umi_processed
 #umi_tools extract --stdin=temp/gz_files/wt_1_MKDL250000598-1A_HV7W7DSXC_L3_2.fq.gz --bc-pattern=NNNNNNNNNNNNNNNNNNNNNNNNNNNNNXXXXXXXXNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN --log=processed.log --stdout temp/umi_processed/wt_1_MKDL250000598-1A_HV7W7DSXC_L3_2.fq.gz
 
-find temp/gz_files/*.gz -exec umi_tools extract --bc-pattern=NNNNNNNNNNNNNNNNNNNNNNNNNNNNNXXXXXXXXNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNNN --log=processed.log {} \;
+find temp/gz_files/*.gz -exec umi_tools extract --bc-pattern=NNNNCCCCNNN --log=temp/umi_processed/processed.log --stdout=temp/umi_processed/processed_{} {} \;
+
+
+for i in $(find temp/gz_files/*.gz ); do j=$(echo $i | cut -d"/" -f3); umi_tools extract --bc-pattern=NNNNCCCCNNN --log=temp/umi_processed/processed.log --stdout="temp/umi_processed/processed_$j" --stdin="$i"; done
+
+umi_tools extract [OPTIONS] -p PATTERN [-I IN_FASTQ[.gz]] [-S OUT_FASTQ[.gz]]
+
+umi_tools extract -p NNNNCCCCNNN -I temp/gz_files/spbeta_1_MKDL250000598-1A_HV7W7DSXC_L3_1.fq.gz -L temp/umi_processed/log/spbeta_1_MKDL250000598-1A_HV7W7DSXC_L3_1.log -S temp/umi_processed/fasta/spbeta_1_MKDL250000598-1A_HV7W7DSXC_L3_1.fq.gz
+
+#  working command
+umi_tools extract -p NNNNCCCCNNN -I temp/gz_files/spbeta_1_MKDL250000598-1A_HV7W7DSXC_L3_1.fq.gz -L temp/umi_processed/log/spbeta_1_MKDL250000598-1A_HV7W7DSXC_L3_1.log -S temp/umi_processed/fasta/spbeta_1_MKDL250000598-1A_HV7W7DSXC_L3_1.fq.gz
+
+
+for i in $(find temp/gz_files/*.gz ); do j=$(echo $i | cut -d"/" -f3); umi_tools extract -p NNNNCCCCNNN -I "temp/gz_files/$j" -L "temp/umi_processed/log/$j.log" -S "temp/umi_processed/fasta/$j"; done
+
 
 mkdir trimmed
