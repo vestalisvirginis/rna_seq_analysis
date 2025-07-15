@@ -1,6 +1,7 @@
 #Folders:
 .venv
 /temp
+tm*
 
 
 #Files
