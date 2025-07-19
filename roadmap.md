@@ -1,5 +1,7 @@
 apt update & apt upgrade
 
+pip install umi-tools
+
 # Install FastQC
 
 apt update && apt install -y \
@@ -24,7 +26,7 @@ cd /opt
 git clone --recurse-submodules https://github.com/BenLangmead/bowtie2.git
 cd bowtie2
 make -j$(nproc)
-PATH="/opt/bowtie2:$PATH"
+PATH=$PATH:/opt/bowtie2
 # to test if it works
 bowtie2 --version
 
