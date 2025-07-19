@@ -8,7 +8,9 @@ if [ ! -d "$PRE_FASTQC" ]; then
     printf '%s\n' "Failed to create pre_fastqc_output directory."
     exit 1
 fi
-echo "Creating fastqc output directory:  $FASTQC_OUTPUT"
+echo "Creating fastqc output directory:  $PRE_FASTQC"
 
 # Run FastQC on all .gz files in the specified directory
-find ${PRE_FASTQC}/*.gz -exec fastqc -o ${FASTQC_OUTPUT} {} \;
+fastqc -V
+
+find $FASTQ_DATA -name "*.gz" -exec fastqc -o ${PRE_FASTQC} {} \;
