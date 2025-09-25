@@ -1,9 +1,19 @@
-from dagster import asset, AssetExecutionContext, file_relative_path, PipesSubprocessClient, MaterializeResult, MetadataValue, open_pipes_session, PipesTempFileContextInjector, PipesTempFileMessageReader
-
+import os
 import shutil
 import subprocess
-import os
 from pathlib import Path
+
+from dagster import (
+    AssetExecutionContext,
+    MaterializeResult,
+    MetadataValue,
+    PipesSubprocessClient,
+    PipesTempFileContextInjector,
+    PipesTempFileMessageReader,
+    asset,
+    file_relative_path,
+    open_pipes_session,
+)
 
 
 @asset(
@@ -19,29 +29,29 @@ def convert_sam_to_bam(context: AssetExecutionContext):
 
     # Create output directory
     Path(QUANTIFICATION_DIR).mkdir(parents=True, exist_ok=True)
-    
+
     if not os.path.exists(QUANTIFICATION_DIR):
         context.log.error(f"Failed to create directory: {QUANTIFICATION_DIR}")
         raise RuntimeError("Failed to create quantification directory")
-    
+
     context.log.info(f"Creating quantification directory: {QUANTIFICATION_DIR}")
 
     # Check samtools version
     version_result = subprocess.run(
-        ["samtools", "--version"], 
-        capture_output=True, 
-        text=True
+        ["samtools", "--version"], capture_output=True, text=True
     )
     context.log.info(f"Samtools version: {version_result.stdout}")
 
     # Conversion
-    os.system(f"find {MAPPING_DIR} -name '*.sam' | while read -r sam_file; do samtools view -bS $sam_file > {QUANTIFICATION_DIR}/$(basename $sam_file .sam).bam; done")
+    os.system(
+        f"find {MAPPING_DIR} -name '*.sam' | while read -r sam_file; do samtools view -bS $sam_file > {QUANTIFICATION_DIR}/$(basename $sam_file .sam).bam; done"
+    )
 
     context.add_output_metadata(
-            metadata={
-                "version": MetadataValue.text(version_result.stdout),
-            }
-        )
+        metadata={
+            "version": MetadataValue.text(version_result.stdout),
+        }
+    )
 
     return QUANTIFICATION_DIR
 
@@ -58,19 +68,19 @@ def sort_bam_files(context: AssetExecutionContext):
 
     # Check samtools version
     version_result = subprocess.run(
-        ["samtools", "--version"], 
-        capture_output=True, 
-        text=True
+        ["samtools", "--version"], capture_output=True, text=True
     )
     context.log.info(f"Samtools version: {version_result.stdout}")
 
     # Sorting BAM files
-    os.system(f"find {QUANTIFICATION_DIR} -name '*.bam' | while read -r bam_file; do samtools sort $bam_file -o {QUANTIFICATION_DIR}/$(basename $bam_file .bam).sorted.bam; done")
+    os.system(
+        f"find {QUANTIFICATION_DIR} -name '*.bam' | while read -r bam_file; do samtools sort $bam_file -o {QUANTIFICATION_DIR}/$(basename $bam_file .bam).sorted.bam; done"
+    )
 
     context.add_output_metadata(
-            metadata={
-                "version": MetadataValue.text(version_result.stdout),
-            }
-        )
+        metadata={
+            "version": MetadataValue.text(version_result.stdout),
+        }
+    )
 
     return QUANTIFICATION_DIR

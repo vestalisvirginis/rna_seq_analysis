@@ -7,11 +7,11 @@ mapfile -t unique_dirs < <(find $RAW_DATA -type f -name '*.txt' -exec dirname {}
 validated_files=()
 
 # Loop through each unique directory
-for dir in "${unique_dirs[@]}"; do 
+for dir in "${unique_dirs[@]}"; do
   #echo "Processing directory: $dir"
   pushd "$dir" || continue
-  while IFS=: read -r filename result; do 
-    if [[ $result == *"OK" ]]; then 
+  while IFS=: read -r filename result; do
+    if [[ $result == *"OK" ]]; then
       if [[ ! " ${validated_files[@]} " =~ " ${dir}/${filename} " ]]; then
         validated_files+=("$dir/$filename")
       fi

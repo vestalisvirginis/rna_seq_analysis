@@ -1,21 +1,30 @@
-from dagster import asset, AssetExecutionContext, file_relative_path, PipesSubprocessClient, MaterializeResult, MetadataValue, open_pipes_session, PipesTempFileContextInjector, PipesTempFileMessageReader
-
 import shutil
 import subprocess
 
+from dagster import (
+    AssetExecutionContext,
+    MaterializeResult,
+    MetadataValue,
+    PipesSubprocessClient,
+    PipesTempFileContextInjector,
+    PipesTempFileMessageReader,
+    asset,
+    file_relative_path,
+    open_pipes_session,
+)
 
-INPUT_FILE_DIR = '/input_data'
+INPUT_FILE_DIR = "/input_data"
 
 
 @asset(
-    #required_resource_keys={"pipes_subprocess_client"},
+    # required_resource_keys={"pipes_subprocess_client"},
     description="Extracts raw data from tar files",
     compute_kind="bash",
-    #io_manager_key="io_manager",
-    #metadata={"owner": OWNER},
+    # io_manager_key="io_manager",
+    # metadata={"owner": OWNER},
 )
 def extraction(context: AssetExecutionContext):
-    #cmd = [shutil.which("bash"),  file_relative_path(__file__, "loading/shell_test.sh")]
+    # cmd = [shutil.which("bash"),  file_relative_path(__file__, "loading/shell_test.sh")]
     bash_path = shutil.which("bash")
     cmd = [bash_path, "/usr/src/rna_pipe/assets/loading/extraction.sh"]
     with open_pipes_session(
@@ -26,25 +35,26 @@ def extraction(context: AssetExecutionContext):
         process = subprocess.Popen(
             cmd,
             env={
-            "INPUT_DATA": INPUT_FILE_DIR,
-            "RAW_DATA": "/data/raw_data",
+                "INPUT_DATA": INPUT_FILE_DIR,
+                "RAW_DATA": "/data/raw_data",
             },
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             universal_newlines=True,
         )
-        
+
         stdout, stderr = process.communicate()
 
         context.add_output_metadata(
             metadata={"command_stdout": MetadataValue.text(stdout)}
         )
-        
+
         while process.poll() is None:
             yield from pipes_session.get_results()
-        
+
         yield from pipes_session.get_results()
+
 
 @asset(
     description="Validates the integrity of extracted data",
@@ -62,28 +72,26 @@ def validation(context: AssetExecutionContext):
         process = subprocess.Popen(
             cmd,
             env={
-            "RAW_DATA": "/data/raw_data",
+                "RAW_DATA": "/data/raw_data",
             },
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             universal_newlines=True,
         )
-        
+
         stdout, stderr = process.communicate()
 
         context.add_output_metadata(
             metadata={
                 "command_stdout": MetadataValue.text(stdout),
-
             }
         )
-        
+
         while process.poll() is None:
             yield from pipes_session.get_results()
-        
-        yield from pipes_session.get_results()
 
+        yield from pipes_session.get_results()
 
 
 @asset(
@@ -102,25 +110,24 @@ def transfer_validated_files(context: AssetExecutionContext):
         process = subprocess.Popen(
             cmd,
             env={
-            "RAW_DATA": "/data/raw_data",
-            "FASTQ_DATA": "/data/fastq_files",
+                "RAW_DATA": "/data/raw_data",
+                "FASTQ_DATA": "/data/fastq_files",
             },
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             universal_newlines=True,
         )
-        
+
         stdout, stderr = process.communicate()
 
         context.add_output_metadata(
             metadata={
                 "command_stdout": MetadataValue.text(stdout),
-
             }
         )
-        
+
         while process.poll() is None:
             yield from pipes_session.get_results()
-        
+
         yield from pipes_session.get_results()

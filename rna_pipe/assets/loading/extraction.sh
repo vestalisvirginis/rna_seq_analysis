@@ -11,5 +11,5 @@ fi
 echo "Creating raw files directory:  $RAW_DATA"
 
 # Extract all .tar files in the user_data directory
-find  $INPUT_DATA  -name "*.tar" -type f -exec tar -xvf {} -C  $RAW_DATA \; 
+find  $INPUT_DATA  -name "*.tar" -type f -exec tar -xvf {} -C  $RAW_DATA \;
 echo "Extracted all .tar files to:  $RAW_DATA"

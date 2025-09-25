@@ -1,0 +1,13 @@
+ops:
+  fasta_gz:
+    config:
+      input_folder: data/raw
+      input_pattern: '*.gz'
+  fasta_md5:
+    config:
+      input_folder: data/raw
+      input_pattern: MD5.txt
+  fastq_concat:
+    config:
+      input_folder: data/raw
+      output_folder: data/outputs/merged_fastq

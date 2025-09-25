@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Create destination directory for 
+# Create destination directory for
 mkdir -p $FASTQ_DATA
 
 # Extract .gz files and copy them

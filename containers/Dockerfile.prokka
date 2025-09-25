@@ -1,0 +1,70 @@
+# --- Stage 1: Build Bowtie2 and dependencies ---
+FROM python:3.11-slim AS build
+
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+RUN apt-get update && apt-get install -y \
+    #libgcc-s1 \
+    #libstdc++6 \
+    #wget \
+    #unzip \
+    bioperl \
+    libxml-simple-perl \
+    default-jre \
+    git \
+    curl \
+    cpanminus \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Bio::SearchIO::hmmer3 Perl module
+RUN cpanm Bio::SearchIO::hmmer3
+
+RUN mkdir -p /tools
+WORKDIR /tools
+RUN git clone https://github.com/tseemann/prokka.git
+
+# --- Stage 2: Minimal runtime with Bowtie2 and dependencies ---
+FROM python:3.11-slim AS runtime
+
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install only runtime dependencies
+RUN apt-get update && apt-get install -y \
+    bioperl \
+    libxml-simple-perl \
+    default-jre \
+    parallel \
+    curl \
+    cpanminus \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Bio::SearchIO::hmmer3 Perl modulemv linux64.table2asn /usr/local/bin/tbl2asn
+RUN cpanm Bio::SearchIO::hmmer3
+
+# Copy Bowtie2 binaries from build stage
+COPY --from=build /tools/prokka /tools/prokka
+
+RUN cp /usr/lib/x86_64-linux-gnu/libidn.so.12 /usr/lib/x86_64-linux-gnu/libidn.so.11
+
+ENV PATH="/tools/prokka/bin:$PATH"
+
+RUN mkdir -p /app
+WORKDIR /app
+RUN prokka --setupdb
+RUN pip install dagster-pipes toolz
+
+VOLUME /scripts
+VOLUME /inputs
+VOLUME /outputs
+
+
+
+# Download and install tbl2asn
+#RUN wget https://ftp.ncbi.nlm.nih.gov/toolbox/ncbi_tools/converters/by_program/tbl2asn/linux64.tbl2asn.gz \
+#    && gunzip linux64.tbl2asn.gz \
+#    && chmod +x linux64.tbl2asn \
+#    && mv linux64.tbl2asn /usr/local/bin/tbl2asn
+
+#    https://ftp.ncbi.nlm.nih.gov/asn1-converters/by_program/table2asn/linux64.table2asn.gz

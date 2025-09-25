@@ -84,7 +84,7 @@ RUN cd /opt && \
     cd samtools-1.19.1 && \
     ./configure && make && make install
 
-# Install FADU 
+# Install FADU
 mkdir -p /opt/julia
 curl -L "https://julialang-s3.julialang.org/bin/linux/aarch64/1.9/julia-1.9.4-linux-aarch64.tar.gz" | \
     tar -xz -C /opt/julia --strip-components=1
