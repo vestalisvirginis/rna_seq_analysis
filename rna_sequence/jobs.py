@@ -9,7 +9,7 @@ fastqc_job = dg.define_asset_job(
     name="fastqc",
     config=yaml.safe_load(
         open(
-            str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "config" / "fastqc.yaml"), "r"
+            str(Path(os.getenv("RNA_SEQUENCE_HOME", "data")) / "config" / "fastqc.yaml"), "r"
         ).read()
     ),
     selection=dg.AssetSelection.all(),

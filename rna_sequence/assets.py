@@ -15,6 +15,7 @@ from toolz.curried import filter as cfilter
 import dagster as dg
 import shutil
 
+
 class RnaSequenceConfig(dg.Config):
     input_pattern: str = "MD5.txt"
     input_folder: str = "data"
@@ -114,7 +115,7 @@ def fasta_gz(
             name="valid_md5",
             description="Validates that md5 strings match the file content",
             asset="md5_validate",
-            blocking=False,  
+            blocking=False,
         )
     ],
     kinds={"python"},
@@ -158,10 +159,10 @@ def fastq_concat(
     context.log.info(str(output_folder))
 
     # Create output directory if it doesn't exist
-    output_folder.mkdir(parents=True, exist_ok=True)    
-    
+    output_folder.mkdir(parents=True, exist_ok=True)
+
     matches = glob("**/*.gz")
-    _has_1 = lambda x: "_1." in x.name    
+    _has_1 = lambda x: "_1." in x.name
     _has_2 = lambda x: "_2." in x.name
 
     # Transformations
