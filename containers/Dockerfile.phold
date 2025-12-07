@@ -1,0 +1,53 @@
+# --- Stage 1: Build Stage ---
+FROM python:3.11-slim AS build
+
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# install non-python dependencies
+RUN mkdir -p /tools
+WORKDIR /tools
+
+# Download Foldseek
+RUN wget https://github.com/steineggerlab/foldseek/releases/download/10-941cd33/foldseek-linux-gpu.tar.gz
+# Extract archives
+RUN tar xvzf foldseek-linux-gpu.tar.gz
+RUN rm *.tar.gz
+
+# Upgrade pip and install libraries with no cache
+RUN pip install --upgrade --no-cache-dir pip
+
+# Install packages into a temporary directory
+RUN pip install --no-cache-dir --prefix=/install dagster-pipes polars toolz phold torch torchvision torchaudio
+# --- Stage 2: Final Slim Runtime ---
+FROM python:3.11-slim AS runtime
+
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install runtime dependencies (libraries needed by compiled binaries)
+RUN apt-get update && apt-get install -y \
+    parallel \
+    aria2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from build stage
+COPY --from=build /install /usr/local
+COPY --from=build /tools/foldseek /usr/local/foldseek
+
+# Export PATH and PERL5LIB
+ENV PATH="/usr/local/foldseek/bin/:$PATH"
+
+# Set working directory
+WORKDIR /app
+
+# Mount points
+VOLUME /scripts
+VOLUME /databases
+VOLUME /inputs
+VOLUME /outputsm

@@ -13,7 +13,7 @@ from toolz import compose, curry, first, last, pipe
 from toolz.curried import filter as cfilter
 
 import dagster as dg
-
+import shutil
 
 class RnaSequenceConfig(dg.Config):
     input_pattern: str = "MD5.txt"
@@ -114,7 +114,7 @@ def fasta_gz(
             name="valid_md5",
             description="Validates that md5 strings match the file content",
             asset="md5_validate",
-            blocking=False,  # TODO implement a way to continue with files that pass the check and only block file/group of files that fail the check
+            blocking=False,  
         )
     ],
     kinds={"python"},
@@ -140,7 +140,7 @@ def md5_validate(
             name="concat_fastq",
             description="Concat re-sequenced fastq files",
             asset="fastq_concat",
-            blocking=False,  # TODO implement a way to continue with files that pass the check and only block file/group of files that fail the check
+            blocking=False,
         )
     ],
     kinds={"python"},
@@ -158,40 +158,18 @@ def fastq_concat(
     context.log.info(str(output_folder))
 
     # Create output directory if it doesn't exist
-    output_folder.mkdir(parents=True, exist_ok=True)
-
-    # Filters
-    def _is_dir(x):
-        return x.is_dir()
-
-    # _is_dir = lambda x: x.is_dir()
-    def _get_subdirs(x):
-        return x.iterdir()
-
-    # _get_subdirs = lambda x: x.iterdir()
-    def _getsubsubdirs(dirs):
-        return map(_get_subdirs, filter(_is_dir, dirs))
-
-    # _getsubsubdirs = lambda dirs: map(_get_subdirs, filter(_is_dir, dirs))
-    def _get_gz_files(x):
-        return x.glob("*.gz")
-
-    # _get_gz_files = lambda x: x.glob("*.gz")
-    def _has_1(x):
-        return "_1." in x.name
-
-    # _has_1 = lambda x: "_1." in x.name
-    def _has_2(x):
-        return "_2." in x  # .name
-
-    # _has_2 = lambda x: "_2." in x  # .name
+    output_folder.mkdir(parents=True, exist_ok=True)    
+    
+    matches = glob("**/*.gz")
+    _has_1 = lambda x: "_1." in x.name    
+    _has_2 = lambda x: "_2." in x.name
 
     # Transformations
     @curry
     def copy_file(dest_folder: Path, src_file: Path) -> str:
         """Copy file to destination and return destination filename"""
         dest = dest_folder / src_file.name
-        os.system(f"cp {src_file} {dest}")
+        shutil.copy2(src_file, dest)
         return dest.name
 
     @curry

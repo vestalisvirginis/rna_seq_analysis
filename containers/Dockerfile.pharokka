@@ -1,0 +1,116 @@
+# --- Stage 1: Build Stage ---
+FROM python:3.11-slim AS build
+
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    build-essential \
+    python3-dev \
+    wget \
+    infernal \
+    infernal-doc \
+    autoconf \
+    automake \
+    libtool \
+    zlib1g-dev \
+    libcapnp-dev \
+    capnproto \
+    default-jdk \
+    && rm -rf /var/lib/apt/lists/*
+
+# install non-python dependencies
+RUN mkdir -p /downloads
+WORKDIR /downloads
+
+# Download MMseqs2
+RUN wget https://github.com/soedinglab/MMseqs2/releases/download/18-8cc5c/mmseqs-linux-avx2.tar.gz
+
+# Download tRNAscan-SE
+RUN wget https://github.com/UCSC-LoweLab/tRNAscan-SE/archive/refs/tags/v2.0.12.tar.gz
+
+# Download Minced
+RUN wget https://github.com/ctSkennerton/minced/archive/refs/tags/0.4.2.tar.gz -O minced-0.4.2.tar.gz
+
+# Download Aragorn
+RUN wget https://www.trna.se/ARAGORN/Downloads/aragorn1.2.41.c
+
+# Download Mash
+RUN wget https://github.com/marbl/Mash/releases/download/v2.3/mash-Linux64-v2.3.tar
+
+# Extract archives
+RUN tar xvzf mmseqs-linux-*.tar.gz
+RUN tar -zxvf v2.0.12.tar.gz
+RUN tar -zxvf minced-0.4.2.tar.gz
+RUN tar -xvf mash-Linux64-v2.3.tar
+RUN rm *.tar.gz *.tar
+
+# Move MMseqs2 to tools
+RUN mkdir -p /tools && mv /downloads/mmseqs* /tools/mmseqs
+
+# Build and install tRNAscan-SE
+WORKDIR /downloads/tRNAscan-SE-2.0.12
+RUN ./configure --prefix=/usr/local/tRNAscan-SE
+RUN make && make install
+
+WORKDIR /usr/local/tRNAscan-SE/bin
+RUN for p in cmbuild cmcalibrate cmsearch cmscan smalign ; do ln -s /usr/bin/$p ; done
+
+# Build and install Minced
+WORKDIR /downloads/minced-0.4.2
+RUN make && mkdir -p /tools/minced && cp minced minced.jar /tools/minced/
+
+# Compile and install Aragorn
+WORKDIR /downloads
+RUN gcc -O3 -ffast-math -finline-functions -o aragorn aragorn1.2.41.c
+RUN mkdir -p /tools/aragorn && mv aragorn /tools/aragorn/
+
+# Move Mash to tools
+RUN mkdir -p /tools/mash && mv /downloads/mash-Linux64-v2.3/mash /tools/mash/
+
+# Upgrade pip and install libraries with no cache
+RUN pip install --upgrade --no-cache-dir pip
+
+# Install packages into a temporary directory
+RUN pip install --no-cache-dir --prefix=/install dagster-pipes polars toolz pharokka bcbio-gff biopython phanotate dnaapler pyrodigal pyrodigal-gv pycirclize alive-progress requests pyhmmer
+
+# --- Stage 2: Final Slim Runtime ---
+FROM python:3.11-slim AS runtime
+
+ENV PIP_ROOT_USER_ACTION=ignore
+ENV PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Install runtime dependencies (libraries needed by compiled binaries)
+RUN apt-get update && apt-get install -y \
+    parallel \
+    infernal \
+    perl \
+    capnproto \
+    default-jre-headless \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy installed packages from build stage
+COPY --from=build /install /usr/local
+COPY --from=build /tools/mmseqs /usr/local/mmseqs
+COPY --from=build /usr/local/tRNAscan-SE /usr/local/tRNAscan-SE
+COPY --from=build /tools/minced /usr/local/minced
+COPY --from=build /tools/aragorn /usr/local/aragorn
+COPY --from=build /tools/mash /usr/local/mash
+
+# Export PATH and PERL5LIB
+ENV PATH="/usr/local/mmseqs/bin/:$PATH"
+ENV PATH="/usr/local/tRNAscan-SE/bin/:$PATH"
+ENV PATH="/usr/local/minced:$PATH"
+ENV PATH="/usr/local/aragorn:$PATH"
+ENV PATH="/usr/local/mash:$PATH"
+
+# Set working directory
+WORKDIR /app
+
+# Mount points
+VOLUME /scripts
+VOLUME /databases
+VOLUME /inputs
+VOLUME /outputs
