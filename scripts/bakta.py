@@ -1,0 +1,7 @@
+#docker run -v /mnt/lab/rna-sequence/rna_seq_analysis/bakta_db/db/:/db -v /mnt/lab/rna-sequence/rna_seq_analysis/temp/:/data --entrypoint /bin/bash --rm oschwengers/bakta:latest -c "bakta --db /db --verbose --output /data/bakta_outputs/p9b1_lys_spbeta --prefix p9b1_lys_spbeta --locus chromosome --locus-tag p9b1 --locus-tag-increment 5 --genus Bacillus --species subtilis --strain P9_B1 --complete --gram + --replicons /data/replicons/p9b1_replicon.tsv --threads 20 /data/P9_B1_lys_SPbeta_bacterial.fasta"
+
+
+#docker run -v /mnt/lab/rna-sequence/rna_seq_analysis/bakta_db/db/:/db -v /mnt/lab/rna-sequence/rna_seq_analysis/temp/:/data --entrypoint /bin/bash --rm oschwengers/bakta:latest -c "bakta --db /db --verbose --output /data/bakta_outputs/mb8b7 --prefix mb8b7 --locus chromosome --locus-tag mb8b7 --locus-tag-increment 5 --genus Bacillus --species subtilis --strain MB8_B7 --complete --gram + --replicons /data/replicons/mb8b7_replicon.tsv --threads 20 /data/NZ_CP045821.1_bacterial.fasta"
+
+
+#docker run -v /mnt/lab/rna-sequence/rna_seq_analysis/bakta_db/db/:/db -v /mnt/lab/rna-sequence/rna_seq_analysis/temp/:/data --entrypoint /bin/bash --rm oschwengers/bakta:latest -c "bakta --db /db --verbose --output /data/bakta_outputs/168 --prefix 168 --locus chromosome --locus-tag 168 --locus-tag-increment 5 --genus Bacillus --species subtilis --strain 168 --complete --gram + --replicons /data/replicons/168_replicon.tsv --threads 20 /data/NC_000964.3_bacterial.fasta"
