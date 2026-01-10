@@ -1,5 +1,8 @@
 import hashlib
 import os
+import duckdb
+import subprocess
+from lxml import html
 from functools import partial
 from glob import glob
 from itertools import chain
@@ -9,18 +12,19 @@ from pathlib import Path
 from typing import Iterator, List, Tuple
 
 from dagster_docker import PipesDockerClient
-from toolz import compose, curry, first, last, pipe
+from toolz import compose, curry, first, last, pipe, groupby
 from toolz.curried import filter as cfilter
+from toolz.curried import valfilter as valfc
 
 import dagster as dg
 
 
 class RnaSequenceConfig(dg.Config):
     input_pattern: str = "MD5.txt"
-    input_folder: str = "data"
+    input_folder: str = "data/input/sequencing_data"
 
     fastq_pattern: str = "*.gz"
-    output_folder: str = "/outputs"
+    output_folder: str = "data/output/pre_processing"
 
     umi_bc_pattern: str = "NNNNCCCCNNN"
     umi_parallel: int = 40
@@ -31,8 +35,14 @@ class RnaSequenceConfig(dg.Config):
 
     samtools_parallel: int = 40
 
+    ribo_id_sam: str = "data/output/ribo_analysis/bowtie2"
+    ribo_id_fastq: str = "data/output/pre_processing/umi_trimmed"
+    ribo_id_clean: str = "data/output/ribo_analysis/clean_reads"
+    ribo_id_rrna: str = "data/output/ribo_analysis/rrna_reads"
+
     prokka_parallel: int = 6
     genomes: str = "references.csv"
+
 
 
 @dg.asset(
@@ -51,7 +61,7 @@ def fasta_md5(
 ) -> Iterator[dg.Output[List[Tuple[str, str]]]]:
     """Retrive MD5 files"""
     files: List[str] = glob(
-        str(Path(config.input_folder) / "**" / config.input_pattern)
+        str(Path(config.input_folder) / "**" / "**" / config.input_pattern)
     )
     pairs = []
     for file in files:
@@ -90,7 +100,7 @@ def fasta_gz(
                 hash_md5.update(chunk)
         return hash_md5.hexdigest()
 
-    files = glob(str(Path(config.input_folder) / "**" / config.fastq_pattern))
+    files = glob(str(Path(config.input_folder) / "**" / "**" / config.fastq_pattern))
     context.log.info(str(files))
     hashes = []
     for file in files:
@@ -153,7 +163,7 @@ def fastq_concat(
     # Define paths
 
     input_folder = Path(config.input_folder)
-    output_folder = Path(config.output_folder)
+    output_folder = Path(config.output_folder) / "preprocessed_fastq"
     context.log.info(str(input_folder))
     context.log.info(str(output_folder))
 
@@ -182,7 +192,7 @@ def fastq_concat(
 
     # _has_1 = lambda x: "_1." in x.name
     def _has_2(x):
-        return "_2." in x  # .name
+        return "_2." in x.name  # .name
 
     # _has_2 = lambda x: "_2." in x  # .name
 
@@ -271,8 +281,9 @@ def fastqc_runner(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
-                    / "merged_fastq"
+                    / "output"
+                    / "pre_processing"
+                    / "preprocessed_fastq"
                 ): {
                     "bind": "/inputs",
                     "mode": "ro",
@@ -280,7 +291,8 @@ def fastqc_runner(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
+                    / "output"
+                    / "pre_processing"
                     / "pre_fastqc"
                 ): {
                     "bind": "/outputs",
@@ -291,7 +303,7 @@ def fastqc_runner(
     )
 
     files_io = os.listdir(
-        str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "data" / "outputs" / "pre_fastqc")
+        str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "data" / "output" / "pre_processing"/ "pre_fastqc")
     )
     _, files_spec = md5_validate
 
@@ -341,8 +353,9 @@ def umitools_runner(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
-                    / "merged_fastq"
+                    / "output"
+                    / "pre_processing"
+                    / "preprocessed_fastq"
                 ): {
                     "bind": "/inputs",
                     "mode": "ro",
@@ -350,7 +363,8 @@ def umitools_runner(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
+                    / "output"
+                    / "pre_processing"
                     / "umi_trimmed"
                 ): {
                     "bind": "/outputs",
@@ -362,7 +376,7 @@ def umitools_runner(
 
     # FIXME: use the glob instead of the listdir
     # files_in = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "inputs"))
-    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs2"))
+    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp2"))
 
     # _stems = compose(first, mc("split", "-"), at("stem"), Path)
     # _f_ins = list(map(_stems, files_in))
@@ -407,7 +421,8 @@ def fastp_runner(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
+                    / "output"
+                    / "pre_processing"
                     / "umi_trimmed"
                 ): {
                     "bind": "/inputs",
@@ -416,8 +431,9 @@ def fastp_runner(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
-                    / "processed_fastq"
+                    / "output"
+                    / "pre_processing"
+                    / "trim_fastq_2"
                 ): {
                     "bind": "/outputs",
                     "mode": "rw",
@@ -428,7 +444,7 @@ def fastp_runner(
 
     # TODO: add fastp_runner validation
     # files_in = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "inputs"))
-    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs2"))
+    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp2"))
 
     # _stems = compose(first, mc("split", "-"), at("stem"), Path)
     # _f_ins = list(map(_stems, files_in))
@@ -471,9 +487,9 @@ def fastqc_post(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
-                    / "processed_fastq"
-                    / "gz"
+                    / "output"
+                    / "pre_processing"
+                    / "umi_trimmed"
                 ): {
                     "bind": "/inputs",
                     "mode": "ro",
@@ -481,8 +497,9 @@ def fastqc_post(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
-                    / "post_fastqc"
+                    / "output"
+                    / "pre_processing"
+                    / "post_fastqc_3"
                 ): {
                     "bind": "/outputs",
                     "mode": "rw",
@@ -492,7 +509,7 @@ def fastqc_post(
     )
 
     # TODO: add validation fastqc_post
-    # files_io = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs"))
+    # files_io = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp"))
     # _, files_spec = md5_validate
 
     # _stems = compose(first, mc("split", "-"), at("stem"), Path)
@@ -504,6 +521,347 @@ def fastqc_post(
 
     yield dg.Output(value=str(result.get_results()))
 
+
+def read_content(html_content: str) -> dict:
+    tree = html.fromstring(html_content)
+    header = ("file_name", "file_type", "encoding", "total_sequences", "total_bases", "poor_quality", "sequence_length", "pct_gc")
+    values = tree.xpath("//h2[@id='M0']/following-sibling::table/tbody/tr/td[2]/text()")
+    return dict(zip(header,values))
+
+# @dg.asset_check(asset=fastqc_post)
+# def content_check():
+#     path = str(
+#                     Path(os.getenv("RNA_SEQUENCE_HOME"))
+#                     / "data"
+#                     / "output"
+#                     / "pre_processing"
+#                     / "post_fastqc_3"
+#                     / "*.html"
+#                 )
+#     files = glob(path)
+#     _key = compose(first, mc("split", "_"), at("name"), Path)
+#     pairs = {}
+#     i = 0
+#     for k,v in groupby(_key, files).items():
+#         a,b = first(v), last(v)
+#         with open(a, "r") as read_a, open(b, "r") as read_b:        
+#             r1 = read_content(read_a.read())
+#             r2 = read_content(read_b.read())
+            
+#             x = int(r1["total_sequences"])
+#             y = int(r2["total_sequences"])
+#             pairs[k] = x == y
+    
+#     return dg.AssetCheckResult(
+#         description="Verify total sequences across R1 and R2",
+#         passed=bool(all(pairs.values())),
+#         metadata=pairs
+#     )
+
+############## RIBO-ANALYSIS
+
+@dg.asset(
+    deps=[fastqc_post],
+    check_specs=[
+        dg.AssetCheckSpec(
+            name="ribo_analysis",
+            description="Align paired-end reads to rRNA index",
+            asset="rrna_mapping",
+            blocking=False,
+        )
+    ],
+    kinds={"docker"},
+)
+def rrna_mapping(
+    context: dg.AssetExecutionContext,
+    config: RnaSequenceConfig,
+    docker_client: PipesDockerClient,
+) -> Iterator[dg.Output[str]]:
+    """Docker execution of bowtie2 tool"""
+    result = docker_client.run(
+        image="bowtie2",
+        command=["python", "/scripts/rrna_mapping_bowtie2.py"],
+        context=context,
+        extras={
+            "parallel_threads": 20,
+        },
+        container_kwargs={
+            "auto_remove": True,
+            "volumes": {
+                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "scripts"): {
+                    "bind": "/scripts",
+                    "mode": "ro",
+                },
+                str(Path(os.getenv("RNA_SEQUENCE_HOME")) 
+                    / "data" 
+                    / "output"
+                    / "pre_processing"
+                    / "umi_trimmed"
+                    ): {
+                    "bind": "/inputs",
+                    "mode": "ro",
+                },
+                str(Path(os.getenv("RNA_SEQUENCE_HOME")) 
+                    / "data" 
+                    / "output"
+                    / "ribo_analysis"
+                    / "index"
+                    ): {
+                    "bind": "/index",
+                    "mode": "ro",
+                },
+                str(
+                    Path(os.getenv("RNA_SEQUENCE_HOME"))
+                    / "data"
+                    / "output"
+                    / "ribo_analysis"
+                ): {
+                    "bind": "/outputs",
+                    "mode": "rw",
+                },
+            },
+        },
+    )
+    yield dg.AssetCheckResult(passed=True, check_name="no_name_yet")
+    yield dg.Output(value=str(result.get_results()))
+
+
+
+@dg.asset(
+    deps=[rrna_mapping],
+    check_specs=[
+        dg.AssetCheckSpec(
+            name="ribo_analysis",
+            description="Extract read IDs from SAM file",
+            asset="parse_sam_for_read_ids",
+            blocking=False,
+        )
+    ],
+    kinds={"duckdb"},
+)
+def parse_sam_for_read_ids(
+    context: dg.AssetExecutionContext,
+    config: RnaSequenceConfig,
+) -> Iterator[dg.Output[str]]:
+    """Parse SAM file to extract read IDs"""
+
+    input_folder = config.ribo_id_sam
+    files_to_split = config.ribo_id_fastq
+    clean_output_dir = config.ribo_id_clean
+    rrna_output_dir = config.ribo_id_rrna
+    
+    stats = []
+    
+    for file in glob(f'{input_folder}/*.sam'):
+
+        context.log.info(f"Parsing {file} for aligned read IDs...")
+    
+        duckdb.sql("""
+            CREATE OR REPLACE TABLE rrna_ids AS
+            SELECT column00 AS read_id
+            FROM read_csv($file, 
+                delim='\t', 
+                header=false,strict_mode=false, 
+                comment='@', ignore_errors=true)
+            """,params={'file': file})
+        rrna_count = duckdb.sql("SELECT COUNT(*) FROM rrna_ids").fetchone()[0]
+        context.log.info(f"Loaded {rrna_count} unique rRNA IDs")
+
+        # Create file paths
+        sample_name = Path(file).stem
+        clean_output_dir.mkdir(parents=True, exist_ok=True)
+        rrna_output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Input file paths
+        original_file_r1 =  files_to_split / f"{sample_name}_1.fq.gz"
+        original_file_r2 =  files_to_split / f"{sample_name}_2.fq.gz"
+
+        # Output file paths
+        rrna_r1 = rrna_output_dir / f"{sample_name}_rRNA_R1.fastq.gz"
+        rrna_r2 = rrna_output_dir / f"{sample_name}_rRNA_R2.fastq.gz"
+        clean_r1 = clean_output_dir / f"{sample_name}_clean_R1.fastq.gz"
+        clean_r2 = clean_output_dir / f"{sample_name}_clean_R2.fastq.gz"
+        
+
+        def split_fastq_file(input_file, output_clean, output_rrna):
+            """Split a single FASTQ file into rRNA and clean files."""
+            context.log.info(f"\n{'='*70}")
+            context.log.info(f"Processing {input_file}")
+            context.log.info('='*70)
+            
+            # Read and parse FASTQ file
+            context.log.info("Reading FASTQ file...")
+            duckdb.sql(f"""
+                CREATE OR REPLACE TABLE fastq_all_lines AS
+                SELECT 
+                    ROW_NUMBER() OVER () - 1 AS line_num,
+                    column0 AS line_content
+                FROM read_csv('{input_file}', 
+                            delim='\n',
+                            header=false,
+                            quote='',
+                            columns={{'column0': 'VARCHAR'}})
+            """)
+            
+            total_lines = duckdb.sql("SELECT COUNT(*) FROM fastq_all_lines").fetchone()[0]
+            total_reads = total_lines // 4
+            context.log.info(f"Read {total_lines} lines ({total_reads} reads)")
+            
+            # Extract headers and classify
+            context.log.info("Classifying reads...")
+            duckdb.sql("""
+                CREATE OR REPLACE TABLE classified_records AS
+                SELECT 
+                    line_num,
+                    line_num / 4 AS record_num,
+                    REGEXP_REPLACE(
+                        REGEXP_REPLACE(line_content, '^@', ''),
+                        '[/\\s].*$', ''
+                    ) AS read_id,
+                    CASE 
+                        WHEN rr.read_id IS NOT NULL THEN 'rrna'
+                        ELSE 'clean'
+                    END AS category
+                FROM fastq_all_lines
+                LEFT JOIN rrna_ids rr 
+                    ON REGEXP_REPLACE(
+                        REGEXP_REPLACE(line_content, '^@', ''),
+                        '[/\\s].*$', ''
+                    ) = rr.read_id
+                WHERE line_num % 4 = 0  -- Header lines only
+            """)
+            
+            # Get counts
+            rrna_reads = duckdb.sql("SELECT COUNT(*) FROM classified_records WHERE category = 'rrna'").fetchone()[0]
+            clean_reads = duckdb.sql("SELECT COUNT(*) FROM classified_records WHERE category = 'clean'").fetchone()[0]
+            
+            context.log.info(f"  rRNA reads: {rrna_reads}")
+            context.log.info(f"  Clean reads: {clean_reads}")
+            
+            # Export rRNA reads
+            context.log.info(f"Writing {output_rrna}...")
+            duckdb.sql(f"""
+                COPY (
+                    SELECT line_content
+                    FROM fastq_all_lines
+                    WHERE line_num / 4 IN (
+                        SELECT record_num 
+                        FROM classified_records 
+                        WHERE category = 'rrna'
+                    )
+                    ORDER BY line_num
+                ) TO '{output_rrna}' (FORMAT CSV, DELIMITER '\n', HEADER false, QUOTE '')
+            """)
+            
+            # Compress with gzip
+            subprocess.run(['gzip', '-f', output_rrna], check=True)
+            
+            # Export clean reads
+            context.log.info(f"Writing {output_clean}...")
+            duckdb.sql(f"""
+                COPY (
+                    SELECT line_content
+                    FROM fastq_all_lines
+                    WHERE line_num / 4 IN (
+                        SELECT record_num 
+                        FROM classified_records 
+                        WHERE category = 'clean'
+                    )
+                    ORDER BY line_num
+                ) TO '{output_clean}' (FORMAT CSV, DELIMITER '\n', HEADER false, QUOTE '')
+            """)
+            
+            # Compress with gzip
+            subprocess.run(['gzip', '-f', output_clean], check=True)
+            
+            return total_reads, rrna_reads, clean_reads
+
+        context.log.info(f"Splitting FASTQ files for sample {sample_name}...")
+
+        # Process both files
+        total_reads1, rrna1, clean1 = split_fastq_file(original_file_r1, clean_r1, rrna_r1)
+        total_reads2, rrna2, clean2 = split_fastq_file(original_file_r2, clean_r2, rrna_r2)
+
+        # Verification
+        context.log.info("\n" + "="*70)
+        context.log.info("VERIFICATION")
+        context.log.info("="*70)
+
+        if total_reads1 != total_reads2:
+            context.log.info("✗ ERROR: Paired-end files have different total reads!")
+            context.log.info(f"  - File 1: {total_reads1} total reads")
+            context.log.info(f"  - File 2: {total_reads2} total reads")
+        else: 
+            context.log.info("✓ SUCCESS: Paired-end files have the same total reads!")
+            total_reads = total_reads1
+        if rrna1 == rrna2 and clean1 == clean2:
+            context.log.info("✓ SUCCESS: Paired-end files are consistent!")
+            context.log.info(f"  - rRNA reads: {rrna1} in each file")
+            context.log.info(f"  - Clean reads: {clean1} in each file")
+        else:
+            context.log.info("✗ WARNING: Paired-end files have different counts!")
+            context.log.info(f"  - File 1: {rrna1} rRNA, {clean1} clean")
+            context.log.info(f"  - File 2: {rrna2} rRNA, {clean2} clean")
+
+        context.log.info("\nOutput files created:")
+        context.log.info(Path(clean_r1).name)
+        context.log.info(Path(rrna_r1).name)
+        context.log.info(Path(clean_r2).name)
+        context.log.info(Path(rrna_r2).name)
+        context.log.info("\nDone!")
+
+        # Statistics
+        stats_dict = {
+            'sample': sample_name,
+            'total_reads': total_reads,
+            'rrna_reads_1': rrna1,
+            'rrna_reads_2': rrna2,
+            'clean_reads_1': clean1,
+            'clean_reads_2': clean2,
+            'rrna_proportion_1': rrna1/total_reads*100,
+            'rrna_proportion_2': rrna2/total_reads*100,
+            'clean_reads_proportion_1': clean1/total_reads*100,
+            'clean_reads_proportion_2': clean2/total_reads*100,
+        }
+
+        stats.append(stats_dict)
+    # very long uses only one cpu at the time - useless
+    #yield dg.AssetCheckResult(passed=True, check_name="no_name_yet")
+    yield dg.Output(value=stats, metadata={"dagster/num_rows": len(stats)})
+
+
+@dg.asset(
+    deps=[parse_sam_for_read_ids],
+    check_specs=[
+        dg.AssetCheckSpec(
+            name="ribo_analysis",
+            description="Check stats",
+            asset="stats_ribo_analysis",
+            blocking=False,
+        )
+    ],
+    kinds={"python"},
+)
+def stats_ribo_analysis(
+    context: dg.AssetExecutionContext,
+    config: RnaSequenceConfig,
+    parse_sam_for_read_ids : List[dict],
+) -> Iterator[dg.Output[str]]:
+    """validate the rRNA content on each files"""
+
+    map(valfc(lambda x: x.startswith('S18')), parse_sam_for_read_ids)
+    map(valfc(lambda x: x.startswith('S23')), parse_sam_for_read_ids)
+    map(valfc(lambda x: x.startswith('S33')), parse_sam_for_read_ids)
+    map(valfc(lambda x: x.startswith('S38')), parse_sam_for_read_ids)
+
+    out = 'to be determined'
+
+    #yield dg.AssetCheckResult(passed=True, check_name="no_name_yet")
+    yield dg.Output(value=out)
+
+
+
+#################### END RIBO - ANALYSIS
 
 @dg.asset(
     deps=[fastqc_post],
@@ -545,10 +903,10 @@ def prokka(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
-                    / "prokka_outputs"
+                    / "output"
+                    / "prokka_output"
                 ): {
-                    "bind": "/outputs",
+                    "bind": "/output",
                     "mode": "rw",
                 },
             },
@@ -557,7 +915,7 @@ def prokka(
 
     # FIXME: use the glob instead of the listdir
     # files_in = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "inputs"))
-    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs2"))
+    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp2"))
 
     # _stems = compose(first, mc("split", "-"), at("stem"), Path)
     # _f_ins = list(map(_stems, files_in))
@@ -608,10 +966,10 @@ def bowtie_index(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
+                    / "output"
                     / "indexes"
                 ): {
-                    "bind": "/outputs",
+                    "bind": "/output",
                     "mode": "rw",
                 },
             },
@@ -620,7 +978,7 @@ def bowtie_index(
 
     # FIXME: use the glob instead of the listdir
     # files_in = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "inputs"))
-    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs2"))
+    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp2"))
 
     # _stems = compose(first, mc("split", "-"), at("stem"), Path)
     # _f_ins = list(map(_stems, files_in))
@@ -667,7 +1025,7 @@ def bowtie_mapping(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
+                    / "output"
                     / "processed_fastq"
                     / "gz"
                 ): {
@@ -677,14 +1035,14 @@ def bowtie_mapping(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
+                    / "output"
                     / "indexes"
                 ): {
                     "bind": "/indexes",
                     "mode": "ro",
                 },
-                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "data" / "outputs"): {
-                    "bind": "/outputs",
+                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "data" / "outpu"): {
+                    "bind": "/output",
                     "mode": "rw",
                 },
             },
@@ -693,7 +1051,7 @@ def bowtie_mapping(
 
     # FIXME: use the glob instead of the listdir
     # files_in = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "inputs"))
-    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs2"))
+    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp2"))
 
     # _stems = compose(first, mc("split", "-"), at("stem"), Path)
     # _f_ins = list(map(_stems, files_in))
@@ -706,30 +1064,30 @@ def bowtie_mapping(
 
 
 @dg.asset(
-    deps=[fastp_runner],
-    check_specs=[
-        dg.AssetCheckSpec(
-            name="file_count",
-            description="Mapping complet",
-            asset="kallisto_pseudo_mapping",
-            blocking=False,
-        )
-    ],
+    deps=[umitools_runner],
+    # check_specs=[
+    #     dg.AssetCheckSpec(
+    #         name="file_count",
+    #         description="create kallisto indexes",
+    #         asset="kallisto_indexes",
+    #         blocking=False,
+    #     )
+    # ],
     kinds={"docker"},
 )
-def kallisto_pseudo_mapping(
+def kallisto_indexes(
     context: dg.AssetExecutionContext,
     config: RnaSequenceConfig,
     docker_client: PipesDockerClient,
 ) -> Iterator[dg.Output[str]]:
-    """Docker execution of bowtie2 tool"""
+    """Docker execution of kallisto tool"""
     result = docker_client.run(
         image="kallisto",
-        command=["python", "/scripts/kallisto.py"],
+        command=["python", "/scripts/kallisto_index.py"],
         context=context,
-        # extras={
-        #    "parallel_threads": config.bowtie_parallel,
-        # },
+        extras={
+           "parallel_threads": 20,
+        },
         container_kwargs={
             "auto_remove": True,
             "volumes": {
@@ -740,23 +1098,19 @@ def kallisto_pseudo_mapping(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
-                    / "processed_fastq"
-                    / "gz"
+                    / "output"
+                    / "annotation"
+                    / "bakta_output"
                 ): {
                     "bind": "/inputs",
                     "mode": "ro",
                 },
-                str(
-                    Path(os.getenv("RNA_SEQUENCE_HOME"))
+                str(Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
-                    / "kallisto_indexes"
+                    / "output"
+                    / "mapping"
+                    / "bact_gene_comp"
                 ): {
-                    "bind": "/indexes",
-                    "mode": "ro",
-                },
-                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "data" / "outputs"): {
                     "bind": "/outputs",
                     "mode": "rw",
                 },
@@ -766,14 +1120,95 @@ def kallisto_pseudo_mapping(
 
     # FIXME: use the glob instead of the listdir
     # files_in = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "inputs"))
-    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs2"))
+    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp2"))
 
     # _stems = compose(first, mc("split", "-"), at("stem"), Path)
     # _f_ins = list(map(_stems, files_in))
     # _f_outs = list(map(_stems, files_out))
     # complete = set(_f_ins).issubset(set(_f_outs))
 
-    yield dg.AssetCheckResult(passed=True, check_name="file_count")
+    # yield dg.AssetCheckResult(passed=True, check_name="file_count")
+
+    yield dg.Output(value=str(result.get_results()))
+
+
+
+@dg.asset(
+    deps=[kallisto_indexes],
+    # check_specs=[
+    #     dg.AssetCheckSpec(
+    #         name="file_count",
+    #         description="Mapping complet",
+    #         asset="kallisto_pseudo_mapping",
+    #         blocking=False,
+    #     )
+    # ],
+    kinds={"docker"},
+)
+def kallisto_pseudo_mapping(
+    context: dg.AssetExecutionContext,
+    config: RnaSequenceConfig,
+    docker_client: PipesDockerClient,
+) -> Iterator[dg.Output[str]]:
+    """Docker execution of kallisto tool"""
+    result = docker_client.run(
+        image="kallisto",
+        command=["python", "/scripts/kallisto.py"],
+        context=context,
+        extras={
+           "parallel_threads": 20,
+        },
+        container_kwargs={
+            "auto_remove": True,
+            "volumes": {
+                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "scripts"): {
+                    "bind": "/scripts",
+                    "mode": "ro",
+                },
+                str(
+                    Path(os.getenv("RNA_SEQUENCE_HOME"))
+                    / "data"
+                    / "output"
+                    / "pre_processing"
+                    / "umi_trimmed"
+                ): {
+                    "bind": "/inputs",
+                    "mode": "ro",
+                },
+                str(
+                    Path(os.getenv("RNA_SEQUENCE_HOME"))
+                    / "data"
+                    / "output"
+                    / "mapping"
+                    / "bact_gene_comp"
+                    / "kallisto_indexes"
+                ): {
+                    "bind": "/indexes",
+                    "mode": "ro",
+                },
+                str(Path(os.getenv("RNA_SEQUENCE_HOME"))
+                    / "data"
+                    / "output"
+                    / "mapping"
+                    / "bact_gene_comp"
+                    ): {
+                    "bind": "/outputs",
+                    "mode": "rw",
+                },
+            },
+        },
+    )
+
+    # FIXME: use the glob instead of the listdir
+    # files_in = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "inputs"))
+    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp2"))
+
+    # _stems = compose(first, mc("split", "-"), at("stem"), Path)
+    # _f_ins = list(map(_stems, files_in))
+    # _f_outs = list(map(_stems, files_out))
+    # complete = set(_f_ins).issubset(set(_f_outs))
+
+    #yield dg.AssetCheckResult(passed=True, check_name="file_count")
 
     yield dg.Output(value=str(result.get_results()))
 
@@ -813,14 +1248,14 @@ def samtools(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
+                    / "output"
                     / "bowtie2"
                 ): {
                     "bind": "/inputs",
                     "mode": "ro",
                 },
-                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "data" / "outputs"): {
-                    "bind": "/outputs",
+                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "data" / "outpu"): {
+                    "bind": "/output",
                     "mode": "rw",
                 },
             },
@@ -829,7 +1264,7 @@ def samtools(
 
     # FIXME: use the glob instead of the listdir
     # files_in = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "inputs"))
-    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs2"))
+    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp2"))
 
     # _stems = compose(first, mc("split", "-"), at("stem"), Path)
     # _f_ins = list(map(_stems, files_in))
@@ -879,8 +1314,8 @@ def fadu_quantification(
                     "bind": "/inputs",
                     "mode": "ro",
                 },
-                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs5"): {
-                    "bind": "/outputs",
+                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outpu5"): {
+                    "bind": "/output",
                     "mode": "rw",
                 },
             },
@@ -889,7 +1324,7 @@ def fadu_quantification(
 
     # FIXME: use the glob instead of the listdir
     # files_in = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "inputs"))
-    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs2"))
+    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp2"))
 
     # _stems = compose(first, mc("split", "-"), at("stem"), Path)
     # _f_ins = list(map(_stems, files_in))
@@ -936,7 +1371,7 @@ def feature_counts(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
+                    / "output"
                     / "sorted_bam"
                 ): {
                     "bind": "/inputs",
@@ -945,14 +1380,14 @@ def feature_counts(
                 str(
                     Path(os.getenv("RNA_SEQUENCE_HOME"))
                     / "data"
-                    / "outputs"
+                    / "output"
                     / "gtf_files"
                 ): {
                     "bind": "/references",
                     "mode": "ro",
                 },
-                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "data" / "outputs"): {
-                    "bind": "/outputs",
+                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "data" / "outpu"): {
+                    "bind": "/output",
                     "mode": "rw",
                 },
             },
@@ -961,7 +1396,7 @@ def feature_counts(
 
     # FIXME: use the glob instead of the listdir
     # files_in = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "inputs"))
-    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs2"))
+    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp2"))
 
     # _stems = compose(first, mc("split", "-"), at("stem"), Path)
     # _f_ins = list(map(_stems, files_in))
@@ -1011,8 +1446,8 @@ def differential_expression(
                     "bind": "/inputs",
                     "mode": "ro",
                 },
-                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs5"): {
-                    "bind": "/outputs",
+                str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outpu5"): {
+                    "bind": "/output",
                     "mode": "rw",
                 },
             },
@@ -1021,7 +1456,7 @@ def differential_expression(
 
     # FIXME: use the glob instead of the listdir
     # files_in = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "inputs"))
-    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outputs2"))
+    # files_out = os.listdir(str(Path(os.getenv("RNA_SEQUENCE_HOME")) / "outp2"))
 
     # _stems = compose(first, mc("split", "-"), at("stem"), Path)
     # _f_ins = list(map(_stems, files_in))

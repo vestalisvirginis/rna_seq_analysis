@@ -111,7 +111,7 @@ with open_dagster_pipes() as context:
             f"{result_path}/168.sam",
             "--threads",
             str(parallel_threads),
-            "--end-to-end",
+            "--end-to-end",   # use --local to have local alignement, ends might be soft clipped 
         ]
         output_168 = subprocess.run(cmd_168, capture_output=True, text=True)
 

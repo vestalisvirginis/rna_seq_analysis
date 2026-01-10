@@ -1,12 +1,3 @@
-# kallisto index -i 168 -t 6
-
-
-# kallisto quant -i /inputs/168 -o /outputs/ -t 6
-
-
-# kallisto quant -i index -o output pairA_1.fastq pairA_2.fastq pairB_1.fastq pairB_2.fastq
-
-
 import re
 import subprocess
 from pathlib import Path
@@ -20,18 +11,25 @@ with open_dagster_pipes() as context:
     result = subprocess.run(["kallisto", "--version"], capture_output=True, text=True)
     version = result.stdout.strip()
     context.log.info(str(version))
-    # context.report_asset_materialization(metadata={"bowtie2_tools_version": version})
-
-    # extras = context.extras
-    # context.log.info(str(extras))
-    # bc_pattern = context.get_extra("bc_pattern")
+    
     parallel_threads = context.get_extra("parallel_threads")
 
-    #######
     inputs = Path("/inputs")
+    indexes = Path("/indexes")
     output_folder = Path("/outputs")
     result_path = output_folder / "kallisto"
     result_path.mkdir(parents=True, exist_ok=True)
+    _168_path = result_path / "168"
+    _168_path.mkdir(parents=True, exist_ok=True)
+    _p9b1_path = result_path / "p9b1"
+    _p9b1_path.mkdir(parents=True, exist_ok=True)
+    _mb8b7_path = result_path / "mb8b7"
+    _mb8b7_path.mkdir(parents=True, exist_ok=True)
+
+    context.log.info("Sort input files")
+
+    context.log.info(f"check input files: {list(inputs.glob('*.gz'))}")
+    context.log.info(f"check index files: {list(indexes.glob('*'))}")
 
     _168_samples = ["S16", "S21", "S26", "S31", "S36", "S41", "S46", "S51", "S56"]
     _p9b1_samples = [
@@ -80,91 +78,87 @@ with open_dagster_pipes() as context:
     _is_168 = lambda x: any(x.startswith(s) for s in _168_samples)
     _is_p9b1 = lambda x: any(x.startswith(s) for s in _p9b1_samples)
     _is_mb8b7 = lambda x: any(x.startswith(s) for s in _mb8b7_samples)
+    _pairs = lambda x: (f'{x}_1.fq.gz', f'{x}_2.fq.gz')
 
     files = compose(set, cmap(_get_prefix))(list(_get_gz_files(inputs)))
 
     _168_files, _p9b1_files, _mb8b7_files = juxt(
-        compose(list, cfilter(_is_168)),
-        compose(list, cfilter(_is_p9b1)),
-        compose(list, cfilter(_is_mb8b7)),
+        compose(list, cmap(_pairs), list, cfilter(_is_168)),
+        compose(list, cmap(_pairs), list, cfilter(_is_p9b1)),
+        compose(list, cmap(_pairs), list, cfilter(_is_mb8b7)),
     )(files)
-
-    # get parameters for bowtie2
-    _1 = lambda x: f"{inputs}/{x}_1.fq.gz"
-    _2 = lambda x: f"{inputs}/{x}_2.fq.gz"
-    # _get_param = lambda x: f"'{"', '".join(x)}'"
-    # _get_param = lambda x: " ".join(str(x))
-    _get_param = lambda x: ",".join(x)
-
-    def get_param(files: list) -> tuple:
-        # return juxt(compose(_get_param, list, cmap(_1)), compose(_get_param, list, cmap(_2)))(files)
-        return juxt(
-            compose(_get_param, list, cmap(_1)), compose(_get_param, list, cmap(_2))
-        )(files)
 
     context.log.info("kallisto: Started")
 
-    if _168_files:
-        context.log.info(f"Processing 168 files: {len(_168_files)} files")
+    for file in _168_files:
+        name = str(Path(Path(file[0]).stem).stem).rstrip('_1')
+        context.log.info(f"Processing 168 files: {name} files")
+        context.log.info(f"Processing 168 files: {inputs}/{file[0]} and {inputs}/{file[1]} files")
 
-        # _param_1, _param_2 = get_param(_168_files)
-        cmd_168 = [
+        cmd = [
             "kallisto",
             "quant",
             "-i",
-            "/indexes/168",
+            f"{indexes}/168.index",
             "-o",
-            "/outputs/kallipso",
+            f"{_168_path}/{name}",
             "-t",
-            "6",
-            _168_files,
+            "20",
+            f"{inputs}/{file[0]}",
+            f"{inputs}/{file[1]}",
         ]
-        output_168 = subprocess.run(cmd_168, capture_output=True, text=True)
 
-        # log_168 = output_168.stdout.strip()
-        # context.log.info(str(log_168))
-        context.log.info("Process complete")
+        context.log.info(f"Running command: {' '.join(cmd)}")
+        output = subprocess.run(cmd, capture_output=True, text=True)
 
-    if _p9b1_files:
-        context.log.info(f"Processing P9B1 files: {len(_p9b1_files)} files")
+        context.log.info(f"File : {name}... Process completed")
 
-        # _param_1, _param_2 = get_param(_p9b1_files)
-        cmd_p9b1 = [
+    for file in _p9b1_files:
+        name = str(Path(Path(file[0]).stem).stem).rstrip('_1')
+        context.log.info(f"Processing p9b1 files: {name} files")
+        context.log.info(f"Processing p9b1 files: {inputs}/{file[0]} and {inputs}/{file[1]} files")
+
+
+        cmd = [
             "kallisto",
             "quant",
             "-i",
-            "/indexes/p9b1_lys_spbeta",
+            f"{indexes}/p9b1_lys_spbeta.index",
             "-o",
-            "/outputs/kallipso",
+            f"{_p9b1_path}/{name}",
             "-t",
-            "6",
-            _p9b1_files,
+            "20",
+            f"{inputs}/{file[0]}",
+            f"{inputs}/{file[1]}",
         ]
-        output_p9b1 = subprocess.run(cmd_p9b1, capture_output=True, text=True)
 
-        # log_p9b1 = output_p9b1.stdout.strip()
-        # context.log.info(str(log_p9b1))
-        context.log.info("Process complete")
+        context.log.info(f"Running command: {' '.join(cmd)}")
+        output = subprocess.run(cmd, capture_output=True, text=True)
 
-    if _mb8b7_files:
-        context.log.info(f"Processing MB8_B7 files: {len(_mb8b7_files)} files")
+        context.log.info(f"File : {name}... Process completed")
 
-        # _param_1, _param_2 = get_param(_mb8b7_files)
-        cmd_mb8b7 = [
+    
+    for file in _mb8b7_files:
+        name = str(Path(Path(file[0]).stem).stem).rstrip('_1')
+        context.log.info(f"Processing mb8b7 files: {name} files")
+        context.log.info(f"Processing mb8b7 files: {inputs}/{file[0]} and {inputs}/{file[1]} files")
+
+        cmd = [
             "kallisto",
             "quant",
             "-i",
-            "/indexes/mb8b7",
+            f"{indexes}/mb8b7.index",
             "-o",
-            "/outputs/kallipso",
+            f"{_mb8b7_path}/{name}",
             "-t",
-            "6",
-            _mb8b7_files,
+            "20",
+            f"{inputs}/{file[0]}",
+            f"{inputs}/{file[1]}",
         ]
-        output_mb8b7 = subprocess.run(cmd_mb8b7, capture_output=True, text=True)
-
-        # log_mb8b7 = output_mb8b7.stdout.strip()
-        # context.log.info(str(output_mb8b7))
-        context.log.info("Process complete")
+        context.log.info(f"Running command: {' '.join(cmd)}")
+        output = subprocess.run(cmd, capture_output=True, text=True)
+        
+        context.log.info(f"File : {name}... Process completed")
+    
 
     context.log.info("kallisto: Completed")

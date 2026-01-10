@@ -29,12 +29,14 @@ with open_dagster_pipes() as context:
         "parallel",
         "-j",
         str(parallel_threads),
-        f"fastp --trim_front1 3 --length_required 20 -i {{}} -o /outputs/gz/{{/}} --html /outputs/html/{{/}}.html --json /outputs/json/{{/}}.json --thread 1",
+        f"fastp -i {{}} -o /outputs/gz/{{/}} --html /outputs/html/{{/}}.html --json /outputs/json/{{/}}.json --thread 1",
     ]
     output = subprocess.run(
         parallel_cmd, stdin=find_proc.stdout, capture_output=True, text=True
     )
     find_proc.stdout.close()
+
+    #--trim_front1 3 --length_required 50
 
     # output = subprocess.run(command, capture_output=True, text=True)
     context.log.info("FastP: Completed")
